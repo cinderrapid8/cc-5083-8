@@ -20,8 +20,11 @@ import numpy as np
 
 from . import imageio
 from .calibrate import calibrate, save_model, load_model
+from .compat import adopted_values
 from .correct import correct_image
 from .detection import detect_control_points, DetectionConfig
+from .geometry import build_channel_mapping
+from .sampling import resample_image
 from .synthetic import SyntheticSpec, generate_dataset
 
 
@@ -65,6 +68,11 @@ def cmd_calibrate(args) -> int:
 
 def cmd_apply(args) -> int:
     model = load_model(args.model)
+    adopted = adopted_values(model)
+    print("adopted values: " + "; ".join(adopted.lines()))
+    # One mapping object for the whole batch: the same target->source
+    # conversion the GUI preview uses, built once from the model.
+    mapping = build_channel_mapping(model)
     os.makedirs(args.outdir, exist_ok=True)
     files = []
     for pat in args.inputs:
@@ -74,10 +82,10 @@ def cmd_apply(args) -> int:
         return 2
     for path in files:
         rgb = imageio.load_image_rgb(path)
-        if rgb.shape[:2] != (model.height, model.width):
+        if rgb.shape[:2] != (mapping.height, mapping.width):
             print(f"skip {path}: size mismatch", file=sys.stderr)
             continue
-        corrected, valid, _ = correct_image(rgb, model)
+        corrected, valid = resample_image(rgb, mapping)
         base = os.path.splitext(os.path.basename(path))[0]
         out_path = os.path.join(args.outdir, base + "_lca.png")
         imageio.save_image_rgb(out_path, corrected)

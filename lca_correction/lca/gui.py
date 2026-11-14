@@ -28,13 +28,15 @@ from PySide6.QtWidgets import (
 )
 
 from . import imageio
-from .calibrate import calibrate, save_model, load_model
-from .correct import correct_image
+from .calibrate import calibrate, save_model
+from .compat import load_model_compat, ui_session_defaults
 from .detection import (
     detect_control_points, DetectionConfig, ControlPoints,
 )
+from .geometry import ChannelMapping, build_channel_mapping
 from .gui_render import rgb_to_pixmap
 from .model import CHANNELS, LcaModel
+from .sampling import resample_image
 
 CHANNEL_COLOR = {"R": QColor(255, 60, 60),
                  "G": QColor(60, 220, 90),
@@ -260,11 +262,24 @@ class MainWindow(QMainWindow):
         self.model: Optional[LcaModel] = None
         self.corrected: Optional[np.ndarray] = None
         self.valid_mask: Optional[np.ndarray] = None
+        self._mapping: Optional[ChannelMapping] = None
+        self._mapping_model: Optional[LcaModel] = None
         self._thread = None
         self._worker = None
+        # Parameters the UI used to fill in implicitly, now one explicit
+        # record so old sessions keep their coordinate convention.
+        self.defaults = ui_session_defaults()
 
         self._build_ui()
         self._log("ready. open a calibration target to begin.")
+        det = self.defaults.detection
+        self._log(
+            "session defaults adopted: "
+            f"reference={self.defaults.reference_channel} "
+            f"fit_center={self.defaults.fit_center} "
+            f"detection=(canny {det.canny_low}/{det.canny_high} "
+            f"sigma={det.sigma} search_radius={det.search_radius} "
+            f"min_points={det.min_points})")
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -386,6 +401,17 @@ class MainWindow(QMainWindow):
         self._log(tb.strip().splitlines()[-1], "error")
         QMessageBox.critical(self, "step failed", tb)
 
+    def _get_mapping(self) -> ChannelMapping:
+        """The single mapping object shared by preview and batch apply."""
+        if self._mapping is None or self._mapping_model is not self.model:
+            self._mapping = build_channel_mapping(self.model)
+            self._mapping_model = self.model
+        return self._mapping
+
+    def _invalidate_mapping(self):
+        self._mapping = None
+        self._mapping_model = None
+
     # ------------------------------------------------------------- actions
     def open_image(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -402,16 +428,18 @@ class MainWindow(QMainWindow):
         self.control = {}
         self.model = None
         self.corrected = None
+        self._invalidate_mapping()
         self._log(f"loaded {path} {self.rgb.shape[1]}x{self.rgb.shape[0]}")
 
     def detect_points(self):
         if self.rgb is None:
             QMessageBox.information(self, "no image", "open an image first")
             return
-        cfg = DetectionConfig()
+        cfg = self.defaults.detection
 
         def job():
-            return detect_control_points(self.rgb, "G", cfg)
+            return detect_control_points(
+                self.rgb, self.defaults.reference_channel, cfg)
 
         self._run_async("detecting shared-edge control points…", job,
                         self._after_detect)
@@ -443,13 +471,15 @@ class MainWindow(QMainWindow):
                 filtered[c] = ControlPoints(
                     cp.channel, cp.reference, cp.ref_points[m],
                     cp.ch_points[m], cp.displacements[m], cp.normals[m])
-            return calibrate(w, h, filtered, "G"), filtered
+            return calibrate(w, h, filtered, self.defaults.reference_channel,
+                             fit_center=self.defaults.fit_center), filtered
 
         self._run_async("fitting constrained LCA model…", job,
                         self._after_fit)
 
     def _after_fit(self, result):
         self.model, used = result
+        self._invalidate_mapping()
         self.control = used
         self.canvas.set_control(used)
         self._refresh_tables()
@@ -481,7 +511,9 @@ class MainWindow(QMainWindow):
             return
 
         def job():
-            return correct_image(self.rgb, self.model)
+            mapping = self._get_mapping()
+            corrected, valid = resample_image(self.rgb, mapping)
+            return corrected, valid, mapping.source_maps
 
         self._run_async("resampling channels onto common frame…", job,
                         self._after_correct)
@@ -499,11 +531,11 @@ class MainWindow(QMainWindow):
 
     def _log_edge_positions(self):
         """Quantitative before/after channel edge-position comparison."""
-        from .detection import DetectionConfig
         cfg = DetectionConfig(bucket_size=24, max_per_bucket=2)
+        ref = self.defaults.reference_channel
         try:
-            before, _ = detect_control_points(self.rgb, "G", cfg)
-            after, _ = detect_control_points(self.corrected, "G", cfg)
+            before, _ = detect_control_points(self.rgb, ref, cfg)
+            after, _ = detect_control_points(self.corrected, ref, cfg)
         except RuntimeError as exc:
             self._log(f"edge-position comparison skipped: {exc}", "warn")
             return
@@ -531,9 +563,20 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "load model", "", "JSON (*.json)")
         if path:
-            self.model = load_model(path)
-            self._report_model()
-            self._log(f"model loaded: {path}")
+            self.load_model_path(path)
+
+    def load_model_path(self, path: str):
+        """Compatibility entry: old model files keep their convention.
+
+        Every value adopted from defaults (instead of the file) is logged,
+        so an old project cannot silently change coordinate convention.
+        """
+        self.model, adopted = load_model_compat(path)
+        self._invalidate_mapping()
+        for line in adopted.lines():
+            self._log(f"compat: adopted {line}")
+        self._report_model()
+        self._log(f"model loaded: {path}")
 
     def batch_apply(self):
         if self.model is None:
@@ -546,16 +589,19 @@ class MainWindow(QMainWindow):
         outdir = QFileDialog.getExistingDirectory(self, "output directory")
         if not outdir:
             return
+        # One mapping object for the whole batch: the same target->source
+        # conversion the preview uses, not a per-image recomputation.
+        mapping = self._get_mapping()
         ok, fail = 0, 0
         for path in files:
             try:
                 rgb = imageio.load_image_rgb(path)
-                if rgb.shape[:2] != (self.model.height, self.model.width):
+                if rgb.shape[:2] != (mapping.height, mapping.width):
                     self._log(f"skip {os.path.basename(path)}: size mismatch",
                               "warn")
                     fail += 1
                     continue
-                corrected, valid, _ = correct_image(rgb, self.model)
+                corrected, valid = resample_image(rgb, mapping)
                 base = os.path.splitext(os.path.basename(path))[0]
                 imageio.save_image_rgb(
                     os.path.join(outdir, base + "_lca.png"), corrected)

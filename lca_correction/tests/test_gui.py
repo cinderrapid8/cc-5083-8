@@ -62,6 +62,19 @@ def test_gui_full_workflow(tmp_path):
     assert win.valid_mask is not None
     assert 0 < (~win.valid_mask).mean() < 0.5
 
+    # After editing points + correcting, channel edge positions and
+    # residuals are still reported by the refactored chain.
+    log = win.logbox.toPlainText()
+    assert "edge position R" in log and "edge position B" in log
+    assert "channel separation" in log
+    assert win.residual_canvas.pixmap() is not None
+
+    # Preview and batch share one mapping object per model.
+    m1 = win._get_mapping()
+    m2 = win._get_mapping()
+    assert m1 is m2
+    assert m1.center == win.model.center
+
     # View switching must not error.
     for mode in ("original", "corrected", "side-by-side"):
         win.view_combo.setCurrentText(mode)
@@ -75,6 +88,15 @@ def test_gui_full_workflow(tmp_path):
     save_model(str(model_path), win.model)
     loaded = load_model(str(model_path))
     assert loaded.width == win.model.width
+
+    # Compatibility entry: loading through the GUI records adopted values.
+    win.load_model_path(str(model_path))
+    log = win.logbox.toPlainText()
+    assert "compat: adopted reference_channel=G" in log
+    assert "principal_point=(320.00, 240.00)" in log
+    assert "default:image-center" in log
+    # Loading a model invalidates the cached mapping.
+    assert win._mapping is None
 
     # Batch apply.
     outdir = tmp_path / "out"
