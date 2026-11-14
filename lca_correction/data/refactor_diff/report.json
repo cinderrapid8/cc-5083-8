@@ -1,0 +1,91 @@
+{
+  "before_rev": "25e34e4",
+  "after_rev": "f9fef4c",
+  "scenarios": {
+    "standard": {
+      "frame": [
+        640,
+        480
+      ],
+      "center": [
+        320.0,
+        240.0
+      ],
+      "r_norm_max": 0.7566642319177318,
+      "corrected_max_abs_diff": 0.0,
+      "validity_mask_mismatches": 0,
+      "maps_max_abs_diff": {
+        "map_G_x": 0.0,
+        "map_G_y": 0.0,
+        "map_R_x": 0.0,
+        "map_R_y": 0.0,
+        "map_B_x": 0.0,
+        "map_B_y": 0.0
+      }
+    },
+    "eccentric": {
+      "frame": [
+        640,
+        480
+      ],
+      "center": [
+        300.25,
+        219.5
+      ],
+      "r_norm_max": 0.7566642319177318,
+      "corrected_max_abs_diff": 0.0,
+      "validity_mask_mismatches": 0,
+      "maps_max_abs_diff": {
+        "map_G_x": 0.0,
+        "map_G_y": 0.0,
+        "map_R_x": 0.0,
+        "map_R_y": 0.0,
+        "map_B_x": 0.0,
+        "map_B_y": 0.0
+      }
+    },
+    "nonsquare": {
+      "frame": [
+        400,
+        240
+      ],
+      "center": [
+        200.0,
+        120.0
+      ],
+      "r_norm_max": 0.8316956268925111,
+      "corrected_max_abs_diff": 0.0,
+      "validity_mask_mismatches": 0,
+      "maps_max_abs_diff": {
+        "map_G_x": 0.0,
+        "map_G_y": 0.0,
+        "map_R_x": 0.0,
+        "map_R_y": 0.0,
+        "map_B_x": 0.0,
+        "map_B_y": 0.0
+      }
+    },
+    "peripheral_gap": {
+      "frame": [
+        640,
+        480
+      ],
+      "center": [
+        320.0,
+        240.0
+      ],
+      "r_norm_max": 0.45,
+      "corrected_max_abs_diff": 0.0,
+      "validity_mask_mismatches": 0,
+      "maps_max_abs_diff": {
+        "map_G_x": 0.0,
+        "map_G_y": 0.0,
+        "map_R_x": 0.0,
+        "map_R_y": 0.0,
+        "map_B_x": 0.0,
+        "map_B_y": 0.0
+      }
+    }
+  },
+  "identical": true
+}
